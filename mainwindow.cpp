@@ -74,6 +74,7 @@ void MainWindow::setupUI() {
     tabs->addTab(createHistoryTab(), "История транзакций");
     tabs->addTab(createAnalysisTab(), "Анализ трат");
     tabs->addTab(createReportTab(), "Отчет и планирование");
+    tabs->addTab(createCatalogTab(), "Каталог и сравнение");
 }
 
 QWidget* MainWindow::createInputTab() {
@@ -134,6 +135,13 @@ QWidget* MainWindow::createHistoryTab() {
     tableHistory->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     tableHistory->setEditTriggers(QAbstractItemView::NoEditTriggers);
     layout->addWidget(tableHistory);
+
+    QPushButton* btnDeleteTrans = new QPushButton("Удалить выбранную транзакцию");
+    btnDeleteTrans->setStyleSheet("background-color: #c0392b; color: white; font-weight: bold;"); // Сделаем её аккуратно красной
+    connect(btnDeleteTrans, &QPushButton::clicked, this, &MainWindow::deleteTransaction);
+
+    layout->addWidget(tableHistory);
+    layout->addWidget(btnDeleteTrans);
 
     return tab;
 }
@@ -360,6 +368,190 @@ void MainWindow::loadFromFile() {
             }
         }
         file.close();
-        refreshViews(); // Обновляем таблицы сразу после загрузки
+        refreshViews();
     }
+}
+
+QWidget* MainWindow::createCatalogTab() {
+    QWidget* tab = new QWidget();
+    QHBoxLayout* mainLayout = new QHBoxLayout(tab);
+
+    // Левая часть: Форма ввода
+    QGroupBox* boxInput = new QGroupBox("Добавить цену в каталог");
+    QFormLayout* form = new QFormLayout(boxInput);
+
+    editProdName = new QLineEdit();
+    editProdName->setPlaceholderText("Например: Молоко 1л");
+
+    cbStoreName = new QComboBox();
+    cbStoreName->addItems({"Пятёрочка", "Магнит", "Перекрёсток", "Лента", "ВкусВилл"});
+
+    sbProdPrice = new QDoubleSpinBox();
+    sbProdPrice->setMaximum(100000);
+    sbProdPrice->setSuffix(" ₽");
+
+    QPushButton* btnAddCatalog = new QPushButton("Внести в каталог");
+    connect(btnAddCatalog, &QPushButton::clicked, this, &MainWindow::addCatalogItem);
+
+    form->addRow("Товар:", editProdName);
+    form->addRow("Магазин:", cbStoreName);
+    form->addRow("Цена:", sbProdPrice);
+    form->addRow(btnAddCatalog);
+
+    QVBoxLayout* rightLayout = new QVBoxLayout();
+
+    tableCatalog = new QTableWidget(0, 3);
+    tableCatalog->setHorizontalHeaderLabels({"Товар", "Магазин", "Цена"});
+    tableCatalog->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    tableCatalog->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    QPushButton* btnDeleteCatalog = new QPushButton("Удалить выбранный товар");
+    btnDeleteCatalog->setStyleSheet("background-color: #c0392b; color: white; font-weight: bold; padding: 6px;");
+    connect(btnDeleteCatalog, &QPushButton::clicked, this, &MainWindow::deleteCatalogItem);
+
+    lblCompareResult = new QLabel("Добавьте товары для сравнения цен.");
+    lblCompareResult->setWordWrap(true);
+    lblCompareResult->setStyleSheet("font-weight: bold; color: #00a8ff; padding: 10px; background: #e1e2e6; border-radius: 5px;");
+
+    rightLayout->addWidget(tableCatalog);
+    rightLayout->addWidget(btnDeleteCatalog);
+    rightLayout->addWidget(lblCompareResult);
+
+    mainLayout->addWidget(boxInput, 1);
+    mainLayout->addLayout(rightLayout, 2);
+
+    loadCatalogFromFile();
+
+    return tab;
+}
+
+void MainWindow::addCatalogItem() {
+    if (editProdName->text().isEmpty() || sbProdPrice->value() <= 0) {
+        QMessageBox::warning(this, "Ошибка", "Заполните название и цену товара!");
+        return;
+    }
+
+    CatalogItem item;
+    // Приводим к нижнему регистру, чтобы "молоко" и "Молоко" считались одним товаром
+    item.productName = editProdName->text().trimmed().toLower();
+    item.storeName = cbStoreName->currentText();
+    item.price = sbProdPrice->value();
+
+    catalogItems.push_back(item);
+
+    // Сбрасываем поля ввода
+    editProdName->clear();
+    sbProdPrice->setValue(0);
+
+    // Обновляем UI и сохраняем файл
+    comparePrices();
+    saveCatalogToFile();
+}
+
+void MainWindow::comparePrices() {
+    tableCatalog->setRowCount(static_cast<int>(catalogItems.size()));
+
+    // Карта для поиска минимальной цены по каждому уникальному товару
+    std::map<QString, double> minPrices;
+    for (const auto& item : catalogItems) {
+        if (minPrices.find(item.productName) == minPrices.end() || item.price < minPrices[item.productName]) {
+            minPrices[item.productName] = item.price;
+        }
+    }
+
+    // Заполняем таблицу
+    for (size_t i = 0; i < catalogItems.size(); ++i) {
+        const auto& item = catalogItems[i];
+
+        tableCatalog->setItem(i, 0, new QTableWidgetItem(item.productName));
+        tableCatalog->setItem(i, 1, new QTableWidgetItem(item.storeName));
+
+        QTableWidgetItem* priceItem = new QTableWidgetItem(QString::number(item.price, 'f', 2) + " ₽");
+
+        if (item.price == minPrices[item.productName]) {
+            priceItem->setForeground(QBrush(QColor("#27ae60"))); // Зеленый цвет текста
+            priceItem->setFont(QFont("Arial", -1, QFont::Bold));
+        }
+        tableCatalog->setItem(i, 2, priceItem);
+    }
+
+    // Генерируем краткий умный совет под таблицей
+    if (!catalogItems.empty()) {
+        QString lastProduct = catalogItems.back().productName;
+        QString bestStore = "";
+        double minPrice = minPrices[lastProduct];
+
+        for (const auto& item : catalogItems) {
+            if (item.productName == lastProduct && item.price == minPrice) {
+                bestStore = item.storeName;
+                break;
+            }
+        }
+        lblCompareResult->setText(QString("💡 Анализ цен: Товар '<b>%1</b>' выгоднее всего покупать в магазине <b>%2</b> по цене <b>%3 ₽</b>.")
+                                      .arg(lastProduct).arg(bestStore).arg(minPrice, 0, 'f', 2));
+    }
+}
+
+void MainWindow::saveCatalogToFile() {
+    QFile file("prices.txt");
+    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QTextStream out(&file);
+        for (const auto& item : catalogItems) {
+            out << item.productName << ";" << item.storeName << ";" << item.price << "\n";
+        }
+        file.close();
+    }
+}
+
+void MainWindow::loadCatalogFromFile() {
+    QFile file("prices.txt");
+    if (!file.exists()) return;
+
+    catalogItems.clear();
+    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QTextStream in(&file);
+        while (!in.atEnd()) {
+            QString line = in.readLine();
+            QStringList parts = line.split(";");
+            if (parts.size() == 3) {
+                CatalogItem item;
+                item.productName = parts[0];
+                item.storeName = parts[1];
+                item.price = parts[2].toDouble();
+                catalogItems.push_back(item);
+            }
+        }
+        file.close();
+        comparePrices();
+    }
+}
+
+void MainWindow::deleteTransaction() {
+    int selectedRow = tableHistory->currentRow();
+
+    if (selectedRow < 0) {
+        QMessageBox::warning(this, "Внимание", "Пожалуйста, выберите транзакцию в таблице для удаления!");
+        return;
+    }
+
+    transactions.erase(transactions.begin() + selectedRow);
+
+    saveToFile();
+    refreshViews();
+    QMessageBox::information(this, "Успех", "Транзакция успешно удалена!");
+}
+
+void MainWindow::deleteCatalogItem() {
+    int selectedRow = tableCatalog->currentRow();
+
+    if (selectedRow < 0) {
+        QMessageBox::warning(this, "Внимание", "Пожалуйста, выберите товар в таблице для удаления!");
+        return;
+    }
+
+    catalogItems.erase(catalogItems.begin() + selectedRow);
+    comparePrices();
+    saveCatalogToFile();
+
+    QMessageBox::information(this, "Успех", "Товар удален из каталога!");
 }

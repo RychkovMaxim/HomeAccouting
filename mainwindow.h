@@ -14,6 +14,7 @@ class QDateEdit;
 class QTableWidget;
 class QTextEdit;
 class QLineEdit;
+class QLabel;
 
 // Структура для хранения данных о транзакции
 struct Transaction {
@@ -21,6 +22,13 @@ struct Transaction {
     bool isIncome; // true - доход, false - расход
     QString category;
     double amount;
+};
+
+// Структура для записи о цене товара в конкретном магазине
+struct CatalogItem {
+    QString productName;
+    QString storeName;
+    double price;
 };
 
 class MainWindow : public QMainWindow {
@@ -34,6 +42,8 @@ private slots:
     void updateCategories();
     void addTransaction();
     void generateReport();
+    void deleteTransaction(); // Слот для удаления транзакции
+    void deleteCatalogItem(); // Слот для удаления товара из каталога
 
 private:
     // Методы создания интерфейса
@@ -73,6 +83,21 @@ private:
     //Работа с файлом
     void saveToFile();   // Запись данных на диск
     void loadFromFile(); // Чтение данных при старте
+
+    std::vector<CatalogItem> catalogItems; // База данных каталога
+
+    QLineEdit* editProdName;
+    QComboBox* cbStoreName;
+    QDoubleSpinBox* sbProdPrice;
+    QTableWidget* tableCatalog;
+    QLabel* lblCompareResult;
+
+    // Методы
+    QWidget* createCatalogTab();
+    void addCatalogItem();
+    void comparePrices();
+    void saveCatalogToFile();
+    void loadCatalogFromFile();
 };
 
 #endif // MAINWINDOW_H
